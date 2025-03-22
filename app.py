@@ -1,26 +1,32 @@
-from flask import Flask, Response, render_template
-import cv2
+from flask import Flask, request, render_template, send_file
+from io import BytesIO
+from threading import Lock
 
 app = Flask(__name__)
 
-frame_holder = {"frame": None}
+latest_frame = None
+lock = Lock()
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+@app.route('/upload_frame', methods=['POST'])
+def upload_frame():
+    global latest_frame
+    with lock:
+        latest_frame = request.files['frame'].read()
+    return '', 200
+
 @app.route('/video_feed')
 def video_feed():
     def generate():
         while True:
-            if frame_holder["frame"] is not None:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_holder["frame"] + b'\r\n')
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            with lock:
+                if latest_frame is not None:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + latest_frame + b'\r\n')
+    return app.response_class(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.route('/upload_frame', methods=['POST'])
-def upload_frame():
-    from flask import request
-    file = request.files['frame']
-    frame_holder["frame"] = file.read()
-    return 'Frame received', 200
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
